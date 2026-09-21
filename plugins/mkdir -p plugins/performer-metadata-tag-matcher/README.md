@@ -57,7 +57,7 @@ Remove duplicate aliases before running the apply task.
 
 Add the following source in Stash:
 
-https://TUO-USERNAME.github.io/stash-performer-metadata-tag-matcher/main/index.yml
+https://holrak.github.io/stash-performer-metadata-tag-matcher/main/index.yml
 
 Then open:
 
