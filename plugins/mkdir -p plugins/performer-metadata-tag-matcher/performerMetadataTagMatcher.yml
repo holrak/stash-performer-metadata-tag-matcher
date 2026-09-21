@@ -1,7 +1,7 @@
 name: Performer Metadata Tag Matcher
 description: Matches performer metadata against existing tag names and aliases.
 version: 0.1.0
-url: https://github.com/TUO-USERNAME/stash-performer-metadata-tag-matcher
+url: https://github.com/holrak/stash-performer-metadata-tag-matcher
 
 exec:
   - performerMetadataTagMatcher.js
