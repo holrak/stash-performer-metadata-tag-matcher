@@ -1,1 +1,84 @@
+name: Performer Metadata Tag Matcher
+description: Matches performer metadata against existing tag names and aliases.
+version: 0.1.0
+url: https://github.com/TUO-USERNAME/stash-performer-metadata-tag-matcher
 
+exec:
+  - performerMetadataTagMatcher.js
+
+interface: js
+errLog: error
+
+settings:
+  match_country:
+    displayName: Match country
+    description: Match the performer country with an existing tag name or alias.
+    type: BOOLEAN
+
+  match_ethnicity:
+    displayName: Match ethnicity
+    description: Match the performer ethnicity with an existing tag name or alias.
+    type: BOOLEAN
+
+  match_eye_color:
+    displayName: Match eye color
+    description: Match the performer eye color with an existing tag name or alias.
+    type: BOOLEAN
+
+  match_hair_color:
+    displayName: Match hair color
+    description: Match the performer hair color with an existing tag name or alias.
+    type: BOOLEAN
+
+  match_gender:
+    displayName: Match gender
+    description: Match the performer gender with an existing tag name or alias.
+    type: BOOLEAN
+
+  preview_only:
+    displayName: Preview only
+    description: Show planned associations without updating performers.
+    type: BOOLEAN
+
+tasks:
+  - name: Preview metadata tag matches
+    description: Find matching tags without modifying performers.
+    defaultArgs:
+      mode: preview
+      fields: country,ethnicity,eye_color,hair_color
+
+  - name: Match all standard metadata
+    description: Match country, ethnicity, eye color and hair color.
+    defaultArgs:
+      mode: apply
+      fields: country,ethnicity,eye_color,hair_color
+
+  - name: Match country only
+    description: Match performer country against existing tag names and aliases.
+    defaultArgs:
+      mode: apply
+      fields: country
+
+  - name: Match ethnicity only
+    description: Match performer ethnicity against existing tag names and aliases.
+    defaultArgs:
+      mode: apply
+      fields: ethnicity
+
+  - name: Match eye color only
+    description: Match performer eye color against existing tag names and aliases.
+    defaultArgs:
+      mode: apply
+      fields: eye_color
+
+  - name: Match hair color only
+    description: Match performer hair color against existing tag names and aliases.
+    defaultArgs:
+      mode: apply
+      fields: hair_color
+
+  - name: Match gender only
+    description: Match performer gender against existing tag names and aliases.
+    defaultArgs:
+      mode: apply
+      fields: gender
