@@ -1,7 +1,325 @@
 (function () {
   "use strict";
 
+  /*
+   * Performer Metadata Tag Matcher
+   *
+   * Funzioni:
+   * - legge i metadata dei performer;
+   * - converte i codici paese ISO alpha-2 in nomi inglesi;
+   * - cerca esclusivamente tag già esistenti;
+   * - cerca sia nel nome sia negli alias dei tag;
+   * - converte Green in Green Eyes per eye_color;
+   * - converte Brown in Brown Hair per hair_color;
+   * - mantiene tutti i tag già assegnati;
+   * - non crea, elimina o sostituisce alcun tag;
+   * - supporta anteprima ed elaborazione batch.
+   */
+
   var PAGE_SIZE = 100;
+
+  /*
+   * Pausa tra gli aggiornamenti.
+   *
+   * Riduce il carico sugli hook attivati da performerUpdate,
+   * per esempio eventuali plugin di sincronizzazione.
+   *
+   * Imposta 0 per disattivarla.
+   */
+  var UPDATE_DELAY_MS = 250;
+
+  /*
+   * Conversione ISO 3166-1 alpha-2 in nome inglese.
+   *
+   * Se il nome utilizzato dai tuoi tag è diverso, aggiungi
+   * questo nome inglese come alias del tag.
+   *
+   * Esempi:
+   * IT -> Italy
+   * US -> United States
+   * VE -> Venezuela
+   */
+  var COUNTRY_NAMES = {
+    AD: "Andorra",
+    AE: "United Arab Emirates",
+    AF: "Afghanistan",
+    AG: "Antigua and Barbuda",
+    AI: "Anguilla",
+    AL: "Albania",
+    AM: "Armenia",
+    AO: "Angola",
+    AQ: "Antarctica",
+    AR: "Argentina",
+    AS: "American Samoa",
+    AT: "Austria",
+    AU: "Australia",
+    AW: "Aruba",
+    AX: "Aland Islands",
+    AZ: "Azerbaijan",
+
+    BA: "Bosnia and Herzegovina",
+    BB: "Barbados",
+    BD: "Bangladesh",
+    BE: "Belgium",
+    BF: "Burkina Faso",
+    BG: "Bulgaria",
+    BH: "Bahrain",
+    BI: "Burundi",
+    BJ: "Benin",
+    BL: "Saint Barthelemy",
+    BM: "Bermuda",
+    BN: "Brunei",
+    BO: "Bolivia",
+    BQ: "Bonaire, Sint Eustatius and Saba",
+    BR: "Brazil",
+    BS: "Bahamas",
+    BT: "Bhutan",
+    BV: "Bouvet Island",
+    BW: "Botswana",
+    BY: "Belarus",
+    BZ: "Belize",
+
+    CA: "Canada",
+    CC: "Cocos Islands",
+    CD: "Democratic Republic of the Congo",
+    CF: "Central African Republic",
+    CG: "Congo",
+    CH: "Switzerland",
+    CI: "Ivory Coast",
+    CK: "Cook Islands",
+    CL: "Chile",
+    CM: "Cameroon",
+    CN: "China",
+    CO: "Colombia",
+    CR: "Costa Rica",
+    CU: "Cuba",
+    CV: "Cape Verde",
+    CW: "Curacao",
+    CX: "Christmas Island",
+    CY: "Cyprus",
+    CZ: "Czechia",
+
+    DE: "Germany",
+    DJ: "Djibouti",
+    DK: "Denmark",
+    DM: "Dominica",
+    DO: "Dominican Republic",
+    DZ: "Algeria",
+
+    EC: "Ecuador",
+    EE: "Estonia",
+    EG: "Egypt",
+    EH: "Western Sahara",
+    ER: "Eritrea",
+    ES: "Spain",
+    ET: "Ethiopia",
+
+    FI: "Finland",
+    FJ: "Fiji",
+    FK: "Falkland Islands",
+    FM: "Micronesia",
+    FO: "Faroe Islands",
+    FR: "France",
+
+    GA: "Gabon",
+    GB: "United Kingdom",
+    GD: "Grenada",
+    GE: "Georgia",
+    GF: "French Guiana",
+    GG: "Guernsey",
+    GH: "Ghana",
+    GI: "Gibraltar",
+    GL: "Greenland",
+    GM: "Gambia",
+    GN: "Guinea",
+    GP: "Guadeloupe",
+    GQ: "Equatorial Guinea",
+    GR: "Greece",
+    GS: "South Georgia and the South Sandwich Islands",
+    GT: "Guatemala",
+    GU: "Guam",
+    GW: "Guinea-Bissau",
+    GY: "Guyana",
+
+    HK: "Hong Kong",
+    HM: "Heard Island and McDonald Islands",
+    HN: "Honduras",
+    HR: "Croatia",
+    HT: "Haiti",
+    HU: "Hungary",
+
+    ID: "Indonesia",
+    IE: "Ireland",
+    IL: "Israel",
+    IM: "Isle of Man",
+    IN: "India",
+    IO: "British Indian Ocean Territory",
+    IQ: "Iraq",
+    IR: "Iran",
+    IS: "Iceland",
+    IT: "Italy",
+
+    JE: "Jersey",
+    JM: "Jamaica",
+    JO: "Jordan",
+    JP: "Japan",
+
+    KE: "Kenya",
+    KG: "Kyrgyzstan",
+    KH: "Cambodia",
+    KI: "Kiribati",
+    KM: "Comoros",
+    KN: "Saint Kitts and Nevis",
+    KP: "North Korea",
+    KR: "South Korea",
+    KW: "Kuwait",
+    KY: "Cayman Islands",
+    KZ: "Kazakhstan",
+
+    LA: "Laos",
+    LB: "Lebanon",
+    LC: "Saint Lucia",
+    LI: "Liechtenstein",
+    LK: "Sri Lanka",
+    LR: "Liberia",
+    LS: "Lesotho",
+    LT: "Lithuania",
+    LU: "Luxembourg",
+    LV: "Latvia",
+    LY: "Libya",
+
+    MA: "Morocco",
+    MC: "Monaco",
+    MD: "Moldova",
+    ME: "Montenegro",
+    MF: "Saint Martin",
+    MG: "Madagascar",
+    MH: "Marshall Islands",
+    MK: "North Macedonia",
+    ML: "Mali",
+    MM: "Myanmar",
+    MN: "Mongolia",
+    MO: "Macao",
+    MP: "Northern Mariana Islands",
+    MQ: "Martinique",
+    MR: "Mauritania",
+    MS: "Montserrat",
+    MT: "Malta",
+    MU: "Mauritius",
+    MV: "Maldives",
+    MW: "Malawi",
+    MX: "Mexico",
+    MY: "Malaysia",
+    MZ: "Mozambique",
+
+    NA: "Namibia",
+    NC: "New Caledonia",
+    NE: "Niger",
+    NF: "Norfolk Island",
+    NG: "Nigeria",
+    NI: "Nicaragua",
+    NL: "Netherlands",
+    NO: "Norway",
+    NP: "Nepal",
+    NR: "Nauru",
+    NU: "Niue",
+    NZ: "New Zealand",
+
+    OM: "Oman",
+
+    PA: "Panama",
+    PE: "Peru",
+    PF: "French Polynesia",
+    PG: "Papua New Guinea",
+    PH: "Philippines",
+    PK: "Pakistan",
+    PL: "Poland",
+    PM: "Saint Pierre and Miquelon",
+    PN: "Pitcairn",
+    PR: "Puerto Rico",
+    PS: "Palestine",
+    PT: "Portugal",
+    PW: "Palau",
+    PY: "Paraguay",
+
+    QA: "Qatar",
+
+    RE: "Reunion",
+    RO: "Romania",
+    RS: "Serbia",
+    RU: "Russia",
+    RW: "Rwanda",
+
+    SA: "Saudi Arabia",
+    SB: "Solomon Islands",
+    SC: "Seychelles",
+    SD: "Sudan",
+    SE: "Sweden",
+    SG: "Singapore",
+    SH: "Saint Helena",
+    SI: "Slovenia",
+    SJ: "Svalbard and Jan Mayen",
+    SK: "Slovakia",
+    SL: "Sierra Leone",
+    SM: "San Marino",
+    SN: "Senegal",
+    SO: "Somalia",
+    SR: "Suriname",
+    SS: "South Sudan",
+    ST: "Sao Tome and Principe",
+    SV: "El Salvador",
+    SX: "Sint Maarten",
+    SY: "Syria",
+    SZ: "Eswatini",
+
+    TC: "Turks and Caicos Islands",
+    TD: "Chad",
+    TF: "French Southern Territories",
+    TG: "Togo",
+    TH: "Thailand",
+    TJ: "Tajikistan",
+    TK: "Tokelau",
+    TL: "Timor-Leste",
+    TM: "Turkmenistan",
+    TN: "Tunisia",
+    TO: "Tonga",
+    TR: "Turkey",
+    TT: "Trinidad and Tobago",
+    TV: "Tuvalu",
+    TW: "Taiwan",
+    TZ: "Tanzania",
+
+    UA: "Ukraine",
+    UG: "Uganda",
+    UM: "United States Minor Outlying Islands",
+    US: "United States",
+    UY: "Uruguay",
+    UZ: "Uzbekistan",
+
+    VA: "Vatican City",
+    VC: "Saint Vincent and the Grenadines",
+    VE: "Venezuela",
+    VG: "British Virgin Islands",
+    VI: "United States Virgin Islands",
+    VN: "Vietnam",
+    VU: "Vanuatu",
+
+    WF: "Wallis and Futuna",
+    WS: "Samoa",
+
+    /*
+     * XK non è un codice ISO ufficialmente assegnato,
+     * ma viene frequentemente utilizzato per il Kosovo.
+     */
+    XK: "Kosovo",
+
+    YE: "Yemen",
+    YT: "Mayotte",
+
+    ZA: "South Africa",
+    ZM: "Zambia",
+    ZW: "Zimbabwe"
+  };
 
   var FIELD_LABELS = {
     country: "Country",
@@ -12,10 +330,11 @@
   };
 
   /*
-   * Carichiamo tutti i tag in una sola volta.
+   * Carica tutti i tag esistenti.
    *
-   * Questa query evita sort e direction, che possono creare
-   * incompatibilità tra differenti versioni di Stash.
+   * per_page: -1 evita di dover paginare i tag.
+   * Non vengono utilizzati sort o direction per una maggiore
+   * compatibilità tra versioni di Stash.
    */
   var FIND_TAGS_QUERY = `
     query FindTags {
@@ -34,6 +353,9 @@
     }
   `;
 
+  /*
+   * Carica i performer in pagine da 100 elementi.
+   */
   var FIND_PERFORMERS_QUERY = `
     query FindPerformers($page: Int!, $perPage: Int!) {
       findPerformers(
@@ -60,6 +382,12 @@
     }
   `;
 
+  /*
+   * Aggiorna soltanto l'elenco dei tag del performer.
+   *
+   * Prima della mutation vengono mantenuti tutti gli ID
+   * dei tag già presenti.
+   */
   var UPDATE_PERFORMER_MUTATION = `
     mutation PerformerUpdate($input: PerformerUpdateInput!) {
       performerUpdate(input: $input) {
@@ -82,13 +410,32 @@
     return normalized.length > 0 ? normalized : null;
   }
 
+  function uniqueStrings(values) {
+    var seen = {};
+    var output = [];
+
+    for (var i = 0; i < values.length; i += 1) {
+      var value = values[i];
+      var key = normalizeValue(value);
+
+      if (key && !seen[key]) {
+        seen[key] = true;
+        output.push(value);
+      }
+    }
+
+    return output;
+  }
+
   /*
-   * Converte il contenuto del metadata nel nome da cercare.
+   * Converte il valore del metadata nel testo da cercare.
    *
-   * Green + eye_color  -> Green Eyes
-   * Brown + hair_color -> Brown Hair
-   *
-   * Gli altri metadata rimangono invariati.
+   * Esempi:
+   * country IT       -> Italy
+   * country US       -> United States
+   * eye_color Green  -> Green Eyes
+   * hair_color Brown -> Brown Hair
+   * ethnicity Asian  -> Asian
    */
   function buildSearchValue(field, metadataValue) {
     if (
@@ -98,585 +445,4 @@
       return null;
     }
 
-    var value = String(metadataValue).trim();
-
-    if (!value) {
-      return null;
-    }
-
-    if (field === "eye_color") {
-      return value + " Eyes";
-    }
-
-    if (field === "hair_color") {
-      return value + " Hair";
-    }
-
-    return value;
-  }
-
-  function uniqueValues(values) {
-    var seen = {};
-    var output = [];
-
-    for (var i = 0; i < values.length; i += 1) {
-      var value = values[i];
-
-      if (!seen[value]) {
-        seen[value] = true;
-        output.push(value);
-      }
-    }
-
-    return output;
-  }
-
-  function parseSelectedFields(args) {
-    var defaultFields = [
-      "country",
-      "ethnicity",
-      "eye_color",
-      "hair_color"
-    ];
-
-    if (!args || !args.fields) {
-      return defaultFields;
-    }
-
-    var requestedFields = String(args.fields).split(",");
-    var selectedFields = [];
-
-    for (var i = 0; i < requestedFields.length; i += 1) {
-      var field = requestedFields[i].trim();
-
-      if (FIELD_LABELS[field]) {
-        selectedFields.push(field);
-      }
-    }
-
-    if (selectedFields.length === 0) {
-      return defaultFields;
-    }
-
-    return uniqueValues(selectedFields);
-  }
-
-  function loadAllTags() {
-    log.Info("Loading existing tags...");
-
-    var result = gql.Do(FIND_TAGS_QUERY, {});
-
-    if (!result) {
-      throw new Error(
-        "The findTags query returned an empty result."
-      );
-    }
-
-    if (!result.findTags) {
-      throw new Error(
-        "The GraphQL response does not contain findTags."
-      );
-    }
-
-    var tags = result.findTags.tags || [];
-
-    log.Info(
-      "Loaded " +
-      tags.length +
-      " existing tags from Stash."
-    );
-
-    return tags;
-  }
-
-  /*
-   * Crea un indice che comprende:
-   *
-   * nome del tag -> tag
-   * alias del tag -> tag
-   */
-  function buildTagIndex(tags) {
-    var index = {};
-    var duplicateMatches = {};
-
-    function registerValue(value, tag, source) {
-      var normalized = normalizeValue(value);
-
-      if (!normalized) {
-        return;
-      }
-
-      if (!index[normalized]) {
-        index[normalized] = {
-          tag: tag,
-          source: source,
-          matchedText: value
-        };
-
-        return;
-      }
-
-      if (String(index[normalized].tag.id) !== String(tag.id)) {
-        if (!duplicateMatches[normalized]) {
-          duplicateMatches[normalized] = [
-            index[normalized].tag.name
-          ];
-        }
-
-        duplicateMatches[normalized].push(tag.name);
-      }
-    }
-
-    for (var i = 0; i < tags.length; i += 1) {
-      var tag = tags[i];
-
-      registerValue(tag.name, tag, "name");
-
-      var aliases = tag.aliases || [];
-
-      for (var j = 0; j < aliases.length; j += 1) {
-        registerValue(aliases[j], tag, "alias");
-      }
-    }
-
-    return {
-      index: index,
-      duplicateMatches: duplicateMatches
-    };
-  }
-
-  function getMetadataValue(performer, field) {
-    var value = performer[field];
-
-    if (value === null || value === undefined) {
-      return null;
-    }
-
-    /*
-     * Compatibilità con eventuali campi GraphQL
-     * restituiti come oggetto.
-     */
-    if (typeof value === "object") {
-      if (value.name) {
-        return String(value.name);
-      }
-
-      return null;
-    }
-
-    return String(value);
-  }
-
-  function findExpectedTags(
-    performer,
-    selectedFields,
-    tagIndex
-  ) {
-    var matchedTags = [];
-    var unmatchedValues = [];
-
-    for (var i = 0; i < selectedFields.length; i += 1) {
-      var field = selectedFields[i];
-
-      var metadataValue = getMetadataValue(
-        performer,
-        field
-      );
-
-      if (!metadataValue) {
-        continue;
-      }
-
-      /*
-       * Applichiamo la trasformazione richiesta:
-       *
-       * eye_color Green  -> Green Eyes
-       * hair_color Brown -> Brown Hair
-       */
-      var searchValue = buildSearchValue(
-        field,
-        metadataValue
-      );
-
-      var normalizedSearchValue = normalizeValue(
-        searchValue
-      );
-
-      if (!normalizedSearchValue) {
-        continue;
-      }
-
-      var matchingEntry = tagIndex[
-        normalizedSearchValue
-      ];
-
-      if (matchingEntry) {
-        matchedTags.push({
-          field: field,
-          metadataValue: metadataValue,
-          searchValue: searchValue,
-          tag: matchingEntry.tag,
-          matchSource: matchingEntry.source,
-          matchedText: matchingEntry.matchedText
-        });
-      } else {
-        unmatchedValues.push({
-          field: field,
-          metadataValue: metadataValue,
-          searchValue: searchValue
-        });
-      }
-    }
-
-    return {
-      matchedTags: matchedTags,
-      unmatchedValues: unmatchedValues
-    };
-  }
-
-  /*
-   * Mantiene tutti i tag esistenti e aggiunge
-   * esclusivamente quelli mancanti.
-   */
-  function calculateUpdatedTagIds(
-    existingTags,
-    matchedTags
-  ) {
-    var tagIds = [];
-    var existingIds = {};
-    var addedTags = [];
-
-    for (var i = 0; i < existingTags.length; i += 1) {
-      var existingId = String(existingTags[i].id);
-
-      if (!existingIds[existingId]) {
-        existingIds[existingId] = true;
-        tagIds.push(existingId);
-      }
-    }
-
-    for (var j = 0; j < matchedTags.length; j += 1) {
-      var matchedTagId = String(
-        matchedTags[j].tag.id
-      );
-
-      if (!existingIds[matchedTagId]) {
-        existingIds[matchedTagId] = true;
-        tagIds.push(matchedTagId);
-        addedTags.push(matchedTags[j]);
-      }
-    }
-
-    return {
-      tagIds: tagIds,
-      addedTags: addedTags
-    };
-  }
-
-  function updatePerformer(performerId, tagIds) {
-    return gql.Do(
-      UPDATE_PERFORMER_MUTATION,
-      {
-        input: {
-          id: String(performerId),
-          tag_ids: tagIds
-        }
-      }
-    );
-  }
-
-  function logDuplicateMatches(duplicateMatches) {
-    var keys = Object.keys(duplicateMatches);
-
-    if (keys.length === 0) {
-      return;
-    }
-
-    log.Warn(
-      "Some tag names or aliases correspond to multiple tags."
-    );
-
-    for (var i = 0; i < keys.length; i += 1) {
-      var key = keys[i];
-
-      log.Warn(
-        'Duplicate value "' +
-        key +
-        '": ' +
-        duplicateMatches[key].join(", ")
-      );
-    }
-  }
-
-  function registerUnmatchedValue(
-    statistics,
-    unmatched
-  ) {
-    var key =
-      unmatched.field +
-      ":" +
-      normalizeValue(unmatched.searchValue);
-
-    if (!statistics.unmatchedValues[key]) {
-      statistics.unmatchedValues[key] = {
-        field: unmatched.field,
-        metadataValue: unmatched.metadataValue,
-        searchValue: unmatched.searchValue,
-        count: 0
-      };
-    }
-
-    statistics.unmatchedValues[key].count += 1;
-  }
-
-  function run() {
-    var args = input.Args || input.args || {};
-    var mode = args.mode || "preview";
-    var preview = mode !== "apply";
-
-    var selectedFields = parseSelectedFields(args);
-
-    log.Info("Performer Metadata Tag Matcher started.");
-    log.Info(
-      "Mode: " +
-      (preview ? "preview" : "apply")
-    );
-    log.Info(
-      "Selected fields: " +
-      selectedFields.join(", ")
-    );
-
-    var tags = loadAllTags();
-    var tagData = buildTagIndex(tags);
-    var tagIndex = tagData.index;
-
-    log.Info(
-      "Searchable tag names and aliases: " +
-      Object.keys(tagIndex).length
-    );
-
-    logDuplicateMatches(
-      tagData.duplicateMatches
-    );
-
-    var statistics = {
-      performersAnalyzed: 0,
-      performersChanged: 0,
-      tagAssociationsAdded: 0,
-      unmatchedValues: {},
-      errors: 0
-    };
-
-    var page = 1;
-    var totalPerformers = null;
-
-    while (
-      totalPerformers === null ||
-      statistics.performersAnalyzed < totalPerformers
-    ) {
-      var result = gql.Do(
-        FIND_PERFORMERS_QUERY,
-        {
-          page: page,
-          perPage: PAGE_SIZE
-        }
-      );
-
-      if (!result || !result.findPerformers) {
-        throw new Error(
-          "The GraphQL response does not contain findPerformers."
-        );
-      }
-
-      var pageResult = result.findPerformers;
-      var performers = pageResult.performers || [];
-
-      totalPerformers = pageResult.count;
-
-      if (performers.length === 0) {
-        break;
-      }
-
-      for (var i = 0; i < performers.length; i += 1) {
-        var performer = performers[i];
-
-        try {
-          var matches = findExpectedTags(
-            performer,
-            selectedFields,
-            tagIndex
-          );
-
-          for (
-            var unmatchedIndex = 0;
-            unmatchedIndex <
-              matches.unmatchedValues.length;
-            unmatchedIndex += 1
-          ) {
-            registerUnmatchedValue(
-              statistics,
-              matches.unmatchedValues[
-                unmatchedIndex
-              ]
-            );
-          }
-
-          var update = calculateUpdatedTagIds(
-            performer.tags || [],
-            matches.matchedTags
-          );
-
-          if (update.addedTags.length > 0) {
-            statistics.performersChanged += 1;
-            statistics.tagAssociationsAdded +=
-              update.addedTags.length;
-
-            var additions = [];
-
-            for (
-              var additionIndex = 0;
-              additionIndex < update.addedTags.length;
-              additionIndex += 1
-            ) {
-              var addition =
-                update.addedTags[additionIndex];
-
-              additions.push(
-                FIELD_LABELS[addition.field] +
-                ' "' +
-                addition.metadataValue +
-                '" searched as "' +
-                addition.searchValue +
-                '" -> tag "' +
-                addition.tag.name +
-                '" matched by ' +
-                addition.matchSource
-              );
-            }
-
-            log.Info(
-              (preview ? "[PREVIEW] " : "[UPDATE] ") +
-              performer.name +
-              ": " +
-              additions.join("; ")
-            );
-
-            if (!preview) {
-              updatePerformer(
-                performer.id,
-                update.tagIds
-              );
-            }
-          }
-        } catch (error) {
-          statistics.errors += 1;
-
-          log.Error(
-            "Unable to process performer " +
-            performer.id +
-            " (" +
-            performer.name +
-            "): " +
-            String(error)
-          );
-        }
-
-        statistics.performersAnalyzed += 1;
-
-        if (totalPerformers > 0) {
-          log.Progress(
-            Math.min(
-              statistics.performersAnalyzed /
-                totalPerformers,
-              1
-            )
-          );
-        }
-      }
-
-      page += 1;
-    }
-
-    var unmatchedList = Object.keys(
-      statistics.unmatchedValues
-    ).map(function (key) {
-      return statistics.unmatchedValues[key];
-    });
-
-    unmatchedList.sort(function (a, b) {
-      if (a.field !== b.field) {
-        return a.field.localeCompare(b.field);
-      }
-
-      return String(a.searchValue).localeCompare(
-        String(b.searchValue)
-      );
-    });
-
-    if (unmatchedList.length > 0) {
-      log.Info(
-        "Metadata values without a matching tag:"
-      );
-
-      for (
-        var unmatchedListIndex = 0;
-        unmatchedListIndex < unmatchedList.length;
-        unmatchedListIndex += 1
-      ) {
-        var item =
-          unmatchedList[unmatchedListIndex];
-
-        log.Info(
-          "- " +
-          FIELD_LABELS[item.field] +
-          ': metadata "' +
-          item.metadataValue +
-          '", searched tag "' +
-          item.searchValue +
-          '" (' +
-          item.count +
-          " performers)"
-        );
-      }
-    }
-
-    log.Progress(1);
-
-    var summary = [
-      "Performer Metadata Tag Matcher completed.",
-      "Mode: " + (preview ? "preview" : "apply"),
-      "Performers analyzed: " +
-        statistics.performersAnalyzed,
-      "Performers requiring changes: " +
-        statistics.performersChanged,
-      "Tag associations added or planned: " +
-        statistics.tagAssociationsAdded,
-      "Unmatched metadata values: " +
-        unmatchedList.length,
-      "Errors: " + statistics.errors
-    ].join("\n");
-
-    log.Info(summary);
-
-    return {
-      Output: summary
-    };
-  }
-
-  try {
-    return run();
-  } catch (error) {
-    var errorMessage = String(error);
-
-    log.Error(
-      "Performer Metadata Tag Matcher fatal error: " +
-      errorMessage
-    );
-
-    return {
-      Error:
-        "Performer Metadata Tag Matcher failed: " +
-        errorMessage
-    };
-  }
-})();
+    var value = String(metadataValue).trim(
