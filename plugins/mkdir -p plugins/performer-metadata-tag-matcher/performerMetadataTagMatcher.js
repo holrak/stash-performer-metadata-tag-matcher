@@ -11,14 +11,17 @@
     gender: "Gender"
   };
 
+  /*
+   * Carichiamo tutti i tag in una sola volta.
+   *
+   * Questa query evita sort e direction, che possono creare
+   * incompatibilità tra differenti versioni di Stash.
+   */
   var FIND_TAGS_QUERY = `
-    query FindTags($page: Int!, $perPage: Int!) {
+    query FindTags {
       findTags(
         filter: {
-          page: $page
-          per_page: $perPage
-          sort: "name"
-          direction: ASC
+          per_page: -1
         }
       ) {
         count
@@ -37,8 +40,6 @@
         filter: {
           page: $page
           per_page: $perPage
-          sort: "name"
-          direction: ASC
         }
       ) {
         count
@@ -76,9 +77,42 @@
     var normalized = String(value)
       .trim()
       .replace(/\s+/g, " ")
-      .toLocaleLowerCase();
+      .toLowerCase();
 
     return normalized.length > 0 ? normalized : null;
+  }
+
+  /*
+   * Converte il contenuto del metadata nel nome da cercare.
+   *
+   * Green + eye_color  -> Green Eyes
+   * Brown + hair_color -> Brown Hair
+   *
+   * Gli altri metadata rimangono invariati.
+   */
+  function buildSearchValue(field, metadataValue) {
+    if (
+      metadataValue === null ||
+      metadataValue === undefined
+    ) {
+      return null;
+    }
+
+    var value = String(metadataValue).trim();
+
+    if (!value) {
+      return null;
+    }
+
+    if (field === "eye_color") {
+      return value + " Eyes";
+    }
+
+    if (field === "hair_color") {
+      return value + " Hair";
+    }
+
+    return value;
   }
 
   function uniqueValues(values) {
@@ -120,46 +154,52 @@
       }
     }
 
-    return selectedFields.length > 0
-      ? uniqueValues(selectedFields)
-      : defaultFields;
+    if (selectedFields.length === 0) {
+      return defaultFields;
+    }
+
+    return uniqueValues(selectedFields);
   }
 
   function loadAllTags() {
-    var page = 1;
-    var allTags = [];
-    var total = null;
+    log.Info("Loading existing tags...");
 
-    while (total === null || allTags.length < total) {
-      var result = gql.Do(FIND_TAGS_QUERY, {
-        page: page,
-        perPage: PAGE_SIZE
-      });
+    var result = gql.Do(FIND_TAGS_QUERY, {});
 
-      var pageResult = result.findTags;
-      var tags = pageResult.tags || [];
-
-      total = pageResult.count;
-
-      for (var i = 0; i < tags.length; i += 1) {
-        allTags.push(tags[i]);
-      }
-
-      if (tags.length === 0) {
-        break;
-      }
-
-      page += 1;
+    if (!result) {
+      throw new Error(
+        "The findTags query returned an empty result."
+      );
     }
 
-    return allTags;
+    if (!result.findTags) {
+      throw new Error(
+        "The GraphQL response does not contain findTags."
+      );
+    }
+
+    var tags = result.findTags.tags || [];
+
+    log.Info(
+      "Loaded " +
+      tags.length +
+      " existing tags from Stash."
+    );
+
+    return tags;
   }
 
+  /*
+   * Crea un indice che comprende:
+   *
+   * nome del tag -> tag
+   * alias del tag -> tag
+   */
   function buildTagIndex(tags) {
     var index = {};
     var duplicateMatches = {};
 
-    function registerValue(value, tag) {
+    function registerValue(value, tag, source) {
       var normalized = normalizeValue(value);
 
       if (!normalized) {
@@ -167,14 +207,19 @@
       }
 
       if (!index[normalized]) {
-        index[normalized] = tag;
+        index[normalized] = {
+          tag: tag,
+          source: source,
+          matchedText: value
+        };
+
         return;
       }
 
-      if (index[normalized].id !== tag.id) {
+      if (String(index[normalized].tag.id) !== String(tag.id)) {
         if (!duplicateMatches[normalized]) {
           duplicateMatches[normalized] = [
-            index[normalized].name
+            index[normalized].tag.name
           ];
         }
 
@@ -185,12 +230,12 @@
     for (var i = 0; i < tags.length; i += 1) {
       var tag = tags[i];
 
-      registerValue(tag.name, tag);
+      registerValue(tag.name, tag, "name");
 
       var aliases = tag.aliases || [];
 
       for (var j = 0; j < aliases.length; j += 1) {
-        registerValue(aliases[j], tag);
+        registerValue(aliases[j], tag, "alias");
       }
     }
 
@@ -207,9 +252,13 @@
       return null;
     }
 
+    /*
+     * Compatibilità con eventuali campi GraphQL
+     * restituiti come oggetto.
+     */
     if (typeof value === "object") {
       if (value.name) {
-        return value.name;
+        return String(value.name);
       }
 
       return null;
@@ -218,31 +267,63 @@
     return String(value);
   }
 
-  function findExpectedTags(performer, selectedFields, tagIndex) {
+  function findExpectedTags(
+    performer,
+    selectedFields,
+    tagIndex
+  ) {
     var matchedTags = [];
     var unmatchedValues = [];
 
     for (var i = 0; i < selectedFields.length; i += 1) {
       var field = selectedFields[i];
-      var originalValue = getMetadataValue(performer, field);
-      var normalizedValue = normalizeValue(originalValue);
 
-      if (!normalizedValue) {
+      var metadataValue = getMetadataValue(
+        performer,
+        field
+      );
+
+      if (!metadataValue) {
         continue;
       }
 
-      var matchingTag = tagIndex[normalizedValue];
+      /*
+       * Applichiamo la trasformazione richiesta:
+       *
+       * eye_color Green  -> Green Eyes
+       * hair_color Brown -> Brown Hair
+       */
+      var searchValue = buildSearchValue(
+        field,
+        metadataValue
+      );
 
-      if (matchingTag) {
+      var normalizedSearchValue = normalizeValue(
+        searchValue
+      );
+
+      if (!normalizedSearchValue) {
+        continue;
+      }
+
+      var matchingEntry = tagIndex[
+        normalizedSearchValue
+      ];
+
+      if (matchingEntry) {
         matchedTags.push({
           field: field,
-          metadataValue: originalValue,
-          tag: matchingTag
+          metadataValue: metadataValue,
+          searchValue: searchValue,
+          tag: matchingEntry.tag,
+          matchSource: matchingEntry.source,
+          matchedText: matchingEntry.matchedText
         });
       } else {
         unmatchedValues.push({
           field: field,
-          value: originalValue
+          metadataValue: metadataValue,
+          searchValue: searchValue
         });
       }
     }
@@ -253,27 +334,36 @@
     };
   }
 
-  function calculateUpdatedTagIds(existingTags, matches) {
+  /*
+   * Mantiene tutti i tag esistenti e aggiunge
+   * esclusivamente quelli mancanti.
+   */
+  function calculateUpdatedTagIds(
+    existingTags,
+    matchedTags
+  ) {
     var tagIds = [];
     var existingIds = {};
+    var addedTags = [];
 
     for (var i = 0; i < existingTags.length; i += 1) {
       var existingId = String(existingTags[i].id);
 
-      existingIds[existingId] = true;
-      tagIds.push(existingId);
+      if (!existingIds[existingId]) {
+        existingIds[existingId] = true;
+        tagIds.push(existingId);
+      }
     }
 
-    var addedTags = [];
+    for (var j = 0; j < matchedTags.length; j += 1) {
+      var matchedTagId = String(
+        matchedTags[j].tag.id
+      );
 
-    for (var j = 0; j < matches.length; j += 1) {
-      var matchedTag = matches[j].tag;
-      var matchedId = String(matchedTag.id);
-
-      if (!existingIds[matchedId]) {
-        existingIds[matchedId] = true;
-        tagIds.push(matchedId);
-        addedTags.push(matches[j]);
+      if (!existingIds[matchedTagId]) {
+        existingIds[matchedTagId] = true;
+        tagIds.push(matchedTagId);
+        addedTags.push(matchedTags[j]);
       }
     }
 
@@ -284,15 +374,18 @@
   }
 
   function updatePerformer(performerId, tagIds) {
-    return gql.Do(UPDATE_PERFORMER_MUTATION, {
-      input: {
-        id: String(performerId),
-        tag_ids: tagIds
+    return gql.Do(
+      UPDATE_PERFORMER_MUTATION,
+      {
+        input: {
+          id: String(performerId),
+          tag_ids: tagIds
+        }
       }
-    });
+    );
   }
 
-  function logDuplicateAliases(duplicateMatches) {
+  function logDuplicateMatches(duplicateMatches) {
     var keys = Object.keys(duplicateMatches);
 
     if (keys.length === 0) {
@@ -300,15 +393,14 @@
     }
 
     log.Warn(
-      "Some tag names or aliases match more than one tag. " +
-      "The first matching tag will be used."
+      "Some tag names or aliases correspond to multiple tags."
     );
 
     for (var i = 0; i < keys.length; i += 1) {
       var key = keys[i];
 
       log.Warn(
-        'Duplicate match "' +
+        'Duplicate value "' +
         key +
         '": ' +
         duplicateMatches[key].join(", ")
@@ -316,23 +408,56 @@
     }
   }
 
+  function registerUnmatchedValue(
+    statistics,
+    unmatched
+  ) {
+    var key =
+      unmatched.field +
+      ":" +
+      normalizeValue(unmatched.searchValue);
+
+    if (!statistics.unmatchedValues[key]) {
+      statistics.unmatchedValues[key] = {
+        field: unmatched.field,
+        metadataValue: unmatched.metadataValue,
+        searchValue: unmatched.searchValue,
+        count: 0
+      };
+    }
+
+    statistics.unmatchedValues[key].count += 1;
+  }
+
   function run() {
     var args = input.Args || input.args || {};
     var mode = args.mode || "preview";
     var preview = mode !== "apply";
+
     var selectedFields = parseSelectedFields(args);
 
-    log.Info("Performer Metadata Tag Matcher started");
-    log.Info("Mode: " + (preview ? "preview" : "apply"));
-    log.Info("Fields: " + selectedFields.join(", "));
+    log.Info("Performer Metadata Tag Matcher started.");
+    log.Info(
+      "Mode: " +
+      (preview ? "preview" : "apply")
+    );
+    log.Info(
+      "Selected fields: " +
+      selectedFields.join(", ")
+    );
 
     var tags = loadAllTags();
     var tagData = buildTagIndex(tags);
     var tagIndex = tagData.index;
 
-    log.Info("Loaded " + tags.length + " existing tags");
+    log.Info(
+      "Searchable tag names and aliases: " +
+      Object.keys(tagIndex).length
+    );
 
-    logDuplicateAliases(tagData.duplicateMatches);
+    logDuplicateMatches(
+      tagData.duplicateMatches
+    );
 
     var statistics = {
       performersAnalyzed: 0,
@@ -349,10 +474,19 @@
       totalPerformers === null ||
       statistics.performersAnalyzed < totalPerformers
     ) {
-      var result = gql.Do(FIND_PERFORMERS_QUERY, {
-        page: page,
-        perPage: PAGE_SIZE
-      });
+      var result = gql.Do(
+        FIND_PERFORMERS_QUERY,
+        {
+          page: page,
+          perPage: PAGE_SIZE
+        }
+      );
+
+      if (!result || !result.findPerformers) {
+        throw new Error(
+          "The GraphQL response does not contain findPerformers."
+        );
+      }
 
       var pageResult = result.findPerformers;
       var performers = pageResult.performers || [];
@@ -375,22 +509,16 @@
 
           for (
             var unmatchedIndex = 0;
-            unmatchedIndex < matches.unmatchedValues.length;
+            unmatchedIndex <
+              matches.unmatchedValues.length;
             unmatchedIndex += 1
           ) {
-            var unmatched = matches.unmatchedValues[unmatchedIndex];
-            var unmatchedKey =
-              unmatched.field + ":" + normalizeValue(unmatched.value);
-
-            if (!statistics.unmatchedValues[unmatchedKey]) {
-              statistics.unmatchedValues[unmatchedKey] = {
-                field: unmatched.field,
-                value: unmatched.value,
-                count: 0
-              };
-            }
-
-            statistics.unmatchedValues[unmatchedKey].count += 1;
+            registerUnmatchedValue(
+              statistics,
+              matches.unmatchedValues[
+                unmatchedIndex
+              ]
+            );
           }
 
           var update = calculateUpdatedTagIds(
@@ -400,7 +528,8 @@
 
           if (update.addedTags.length > 0) {
             statistics.performersChanged += 1;
-            statistics.tagAssociationsAdded += update.addedTags.length;
+            statistics.tagAssociationsAdded +=
+              update.addedTags.length;
 
             var additions = [];
 
@@ -409,15 +538,19 @@
               additionIndex < update.addedTags.length;
               additionIndex += 1
             ) {
-              var addition = update.addedTags[additionIndex];
+              var addition =
+                update.addedTags[additionIndex];
 
               additions.push(
                 FIELD_LABELS[addition.field] +
                 ' "' +
                 addition.metadataValue +
+                '" searched as "' +
+                addition.searchValue +
                 '" -> tag "' +
                 addition.tag.name +
-                '"'
+                '" matched by ' +
+                addition.matchSource
               );
             }
 
@@ -429,7 +562,10 @@
             );
 
             if (!preview) {
-              updatePerformer(performer.id, update.tagIds);
+              updatePerformer(
+                performer.id,
+                update.tagIds
+              );
             }
           }
         } catch (error) {
@@ -450,7 +586,8 @@
         if (totalPerformers > 0) {
           log.Progress(
             Math.min(
-              statistics.performersAnalyzed / totalPerformers,
+              statistics.performersAnalyzed /
+                totalPerformers,
               1
             )
           );
@@ -460,32 +597,42 @@
       page += 1;
     }
 
-    var unmatchedList = Object.keys(statistics.unmatchedValues)
-      .map(function (key) {
-        return statistics.unmatchedValues[key];
-      })
-      .sort(function (a, b) {
-        if (a.field !== b.field) {
-          return a.field.localeCompare(b.field);
-        }
+    var unmatchedList = Object.keys(
+      statistics.unmatchedValues
+    ).map(function (key) {
+      return statistics.unmatchedValues[key];
+    });
 
-        return String(a.value).localeCompare(String(b.value));
-      });
+    unmatchedList.sort(function (a, b) {
+      if (a.field !== b.field) {
+        return a.field.localeCompare(b.field);
+      }
+
+      return String(a.searchValue).localeCompare(
+        String(b.searchValue)
+      );
+    });
 
     if (unmatchedList.length > 0) {
-      log.Info("Metadata values without a matching tag:");
+      log.Info(
+        "Metadata values without a matching tag:"
+      );
 
-      for (var unmatchedListIndex = 0;
+      for (
+        var unmatchedListIndex = 0;
         unmatchedListIndex < unmatchedList.length;
         unmatchedListIndex += 1
       ) {
-        var item = unmatchedList[unmatchedListIndex];
+        var item =
+          unmatchedList[unmatchedListIndex];
 
         log.Info(
           "- " +
           FIELD_LABELS[item.field] +
-          ': "' +
-          item.value +
+          ': metadata "' +
+          item.metadataValue +
+          '", searched tag "' +
+          item.searchValue +
           '" (' +
           item.count +
           " performers)"
@@ -498,10 +645,14 @@
     var summary = [
       "Performer Metadata Tag Matcher completed.",
       "Mode: " + (preview ? "preview" : "apply"),
-      "Performers analyzed: " + statistics.performersAnalyzed,
-      "Performers requiring changes: " + statistics.performersChanged,
-      "Tag associations found: " + statistics.tagAssociationsAdded,
-      "Unmatched metadata values: " + unmatchedList.length,
+      "Performers analyzed: " +
+        statistics.performersAnalyzed,
+      "Performers requiring changes: " +
+        statistics.performersChanged,
+      "Tag associations added or planned: " +
+        statistics.tagAssociationsAdded,
+      "Unmatched metadata values: " +
+        unmatchedList.length,
       "Errors: " + statistics.errors
     ].join("\n");
 
@@ -515,10 +666,17 @@
   try {
     return run();
   } catch (error) {
-    log.Error("Fatal error: " + String(error));
+    var errorMessage = String(error);
+
+    log.Error(
+      "Performer Metadata Tag Matcher fatal error: " +
+      errorMessage
+    );
 
     return {
-      Error: "Plugin failed: " + String(error)
+      Error:
+        "Performer Metadata Tag Matcher failed: " +
+        errorMessage
     };
   }
 })();
