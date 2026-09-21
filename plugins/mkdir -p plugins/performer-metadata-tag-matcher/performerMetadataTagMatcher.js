@@ -43,7 +43,7 @@
     "    tags { id name aliases }",
     "  }",
     "}"
-  ].join("\\n");
+  ].join("\n");
 
   var FIND_PERFORMERS_QUERY = [
     "query FindPerformers($page: Int!, $perPage: Int!) {",
@@ -55,13 +55,13 @@
     "    }",
     "  }",
     "}"
-  ].join("\\n");
+  ].join("\n");
 
   var UPDATE_PERFORMER_MUTATION = [
     "mutation PerformerUpdate($input: PerformerUpdateInput!) {",
     "  performerUpdate(input: $input) { id name }",
     "}"
-  ].join("\\n");
+  ].join("\n");
 
   function normalizeValue(value) {
     if (value === null || value === undefined) return null;
@@ -355,7 +355,7 @@
       "Tag associations added or planned: " + stats.associations,
       "Unmatched metadata values: " + unmatchedKeys.length,
       "Errors: " + stats.errors
-    ].join("\\n");
+    ].join("\n");
 
     log.Info(summary);
     return { Output: summary };
