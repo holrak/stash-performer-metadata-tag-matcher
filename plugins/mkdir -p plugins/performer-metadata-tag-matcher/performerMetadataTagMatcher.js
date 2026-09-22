@@ -98,10 +98,14 @@
       var code = value.toUpperCase();
       return COUNTRY_NAMES[code] || value;
     }
-    if (field === "eye_color") return value + " Eyes";
-    if (field === "hair_color") return value + " Hair";
+    if (field === "eye_color") {
+      return "Eyes - " + value;
+    }  
+    if (field === "hair_color") {
+      return "Hair - " + value;
+    }
     return value;
-  }
+    }
 
   function loadAllTags() {
     log.Info("Loading existing tags...");
