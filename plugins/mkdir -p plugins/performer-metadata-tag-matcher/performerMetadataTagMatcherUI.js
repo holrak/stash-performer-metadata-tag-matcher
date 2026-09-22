@@ -498,8 +498,8 @@
     button.disabled = running;
 
     button.textContent = running
-      ? "Matching tags..."
-      : "Match metadata tags";
+      ? "Matching..."
+      : "Match tags";
   }
 
   function processCurrentPerformer(button) {
@@ -593,61 +593,221 @@
       });
   }
 
-  function findButtonContainer() {
-    var selectors = [
-      ".detail-header .btn-group",
-      ".performer-card .btn-group",
-      ".performer-details .btn-group",
-      ".detail-header",
-      ".performer-card",
-      ".performer-details"
-    ];
+function normalizeButtonText(element) {
+  if (!element) {
+    return "";
+  }
 
-    for (var i = 0; i < selectors.length; i += 1) {
-      var element = document.querySelector(
-        selectors[i]
-      );
+  var values = [
+    element.textContent,
+    element.getAttribute("title"),
+    element.getAttribute("aria-label"),
+    element.getAttribute("data-original-title")
+  ];
 
-      if (element) {
-        return element;
+  var childWithTitle = element.querySelector(
+    "[title], [aria-label]"
+  );
+
+  if (childWithTitle) {
+    values.push(
+      childWithTitle.getAttribute("title")
+    );
+
+    values.push(
+      childWithTitle.getAttribute("aria-label")
+    );
+  }
+
+  return values
+    .filter(function (value) {
+      return Boolean(value);
+    })
+    .join(" ")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+}
+
+function findActionButton() {
+  var buttons = document.querySelectorAll(
+    "button, a.btn, [role='button']"
+  );
+
+  var preferredLabels = [
+    "edit",
+    "auto tag",
+    "merge",
+    "submit to stash-box",
+    "submit to stashbox",
+    "delete"
+  ];
+
+  for (
+    var labelIndex = 0;
+    labelIndex < preferredLabels.length;
+    labelIndex += 1
+  ) {
+    var preferredLabel = preferredLabels[labelIndex];
+
+    for (
+      var buttonIndex = 0;
+      buttonIndex < buttons.length;
+      buttonIndex += 1
+    ) {
+      var button = buttons[buttonIndex];
+
+      if (
+        normalizeButtonText(button).indexOf(
+          preferredLabel
+        ) !== -1
+      ) {
+        return button;
       }
     }
-
-    return null;
   }
 
-  function injectButton() {
-    var performerId = getPerformerId();
+  return null;
+}
 
-    if (!performerId) {
-      return;
+function findButtonContainer() {
+  var actionButton = findActionButton();
+
+  if (actionButton && actionButton.parentElement) {
+    return {
+      container: actionButton.parentElement,
+      referenceButton: actionButton
+    };
+  }
+
+  /*
+   * Se i pulsanti non contengono testo leggibile,
+   * prova i contenitori usati più comunemente nella
+   * scheda performer.
+   */
+  var selectors = [
+    ".performer-details .detail-header .btn-group",
+    ".performer-details .btn-toolbar",
+    ".performer-details .btn-group",
+    ".detail-header .btn-toolbar",
+    ".detail-header .btn-group",
+    ".detail-header .ml-auto",
+    ".detail-header .d-flex",
+    ".performer-details .detail-header"
+  ];
+
+  for (
+    var selectorIndex = 0;
+    selectorIndex < selectors.length;
+    selectorIndex += 1
+  ) {
+    var container = document.querySelector(
+      selectors[selectorIndex]
+    );
+
+    if (container) {
+      return {
+        container: container,
+        referenceButton: null
+      };
+    }
+  }
+
+  return null;
+}
+
+function injectButton() {
+  var performerId = getPerformerId();
+
+  /*
+   * Mostra il pulsante esclusivamente nella pagina
+   * di dettaglio di un performer.
+   */
+  if (!performerId) {
+    var oldButton = document.getElementById(
+      BUTTON_ID
+    );
+
+    if (oldButton && oldButton.parentNode) {
+      oldButton.parentNode.removeChild(oldButton);
     }
 
-    if (document.getElementById(BUTTON_ID)) {
-      return;
-    }
+    return;
+  }
 
-    var container = findButtonContainer();
+  if (document.getElementById(BUTTON_ID)) {
+    return;
+  }
 
-    if (!container) {
-      return;
-    }
+  var target = findButtonContainer();
 
-    var button = document.createElement("button");
+  if (!target || !target.container) {
+    return;
+  }
 
-    button.id = BUTTON_ID;
-    button.type = "button";
-    button.className = "btn btn-primary";
-    button.textContent = "Match metadata tags";
-    button.title =
-      "Aggiunge i tag corrispondenti ai metadata di questo performer";
+  var button = document.createElement("button");
 
-    button.addEventListener("click", function () {
+  button.id = BUTTON_ID;
+  button.type = "button";
+
+  /*
+   * btn-secondary si integra meglio con Edit,
+   * Auto Tag, Merge e gli altri pulsanti della barra.
+   */
+  button.className =
+    "btn btn-secondary performer-metadata-tag-matcher-button";
+
+  button.textContent = "Match metadata tags";
+
+  button.title =
+    "Aggiunge i tag corrispondenti ai metadata di questo performer";
+
+  button.setAttribute(
+    "aria-label",
+    "Match performer metadata tags"
+  );
+
+  /*
+   * Evita che il pulsante venga compresso o nascosto.
+   */
+  button.style.display = "inline-flex";
+  button.style.alignItems = "center";
+  button.style.justifyContent = "center";
+  button.style.width = "auto";
+  button.style.minWidth = "max-content";
+  button.style.whiteSpace = "nowrap";
+  button.style.flexShrink = "0";
+  button.style.marginLeft = "0.25rem";
+  button.style.marginRight = "0.25rem";
+
+  button.addEventListener(
+    "click",
+    function () {
       processCurrentPerformer(button);
-    });
+    }
+  );
 
-    container.appendChild(button);
+  /*
+   * Se abbiamo trovato il pulsante Edit, Auto Tag,
+   * Merge, Submit o Delete, inseriamo il nostro
+   * pulsante nello stesso gruppo.
+   */
+  if (
+    target.referenceButton &&
+    target.referenceButton.parentNode ===
+      target.container
+  ) {
+    /*
+     * Inserimento prima del primo pulsante trovato.
+     */
+    target.container.insertBefore(
+      button,
+      target.referenceButton
+    );
+  } else {
+    target.container.appendChild(button);
   }
+}
 
   var scheduled = false;
 
