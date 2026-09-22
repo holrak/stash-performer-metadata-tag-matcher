@@ -306,11 +306,11 @@
     }
 
     if (field === "eye_color") {
-      return value + " Eyes";
+      return "Eyes - " + value;
     }
-
+    
     if (field === "hair_color") {
-      return value + " Hair";
+      return "Hair - " + value;
     }
 
     return value;
